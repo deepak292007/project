@@ -3,185 +3,124 @@
  *
  * ArogyaLink · SIH 2026 · Problem 26133
  *
- * Returns a valid LnklingTriageResult using lightweight symptom rules
- * when the model is offline, times out, or returns invalid JSON.
- *
- * Contract: same schema as the real model response. UI never knows
- * which path fired — it always receives a well-formed object.
- *
- * Rules:
- *   pregnancy + (fever | high temp | pain)  → high urgency, Obs & Gynae
- *   chest pain | unconscious | seizure       → high urgency, Emergency
- *   fever | breathlessness | spo2 low        → moderate, General OPD / Chest
- *   everything else                          → low, General OPD
+ * Returns a valid LnklingTriageResult using consolidated clinical rules.
+ * Enforces:
+ *   - Consistent urgency levels: 'emergency', 'urgent', 'routine', 'home_care'
+ *   - Negation filtering
+ *   - Cough alone does not trigger emergency
+ *   - Safety floor protection
+ *   - Explicit non-diagnostic disclaimer
  */
 
-const DISCLAIMER = 'AI support — confirm with health worker / doctor';
+import { buildClinicalDecision } from '../services/clinicalDecisionSupport.js';
 
-/**
- * Multilingual patient messages per urgency level.
- * @type {Record<string, Record<string, string>>}
- */
-/**
- * Multilingual patient messages per urgency level.
- * @type {Record<string, Record<string, string>>}
- */
+const DISCLAIMER = 'Clinical Decision Support: Algorithmic assessment for healthcare workers. Strictly non-diagnostic; all clinical actions require clinician confirmation.';
+
 const PATIENT_MSG = {
-  high: {
-    en: 'Please go to the hospital right away. Ask someone to help you now.',
-    hi: 'कृपया अभी अस्पताल जाएं। किसी से मदद मांगें।',
-    mr: 'कृपया आत्ताच रुग्णालयात जा. कोणाची मदत घ्या.',
-    te: 'దయచేసి వెంటనే ఆసుపత్రికి వెళ్లండి. ఎవరినైనా సహాయం అడగండి.',
-    kn: 'ದಯವಿಟ್ಟು ತಕ್ಷಣ ಆಸ್ಪತ್ರೆಗೆ ತೆರಳಿ. ಯಾರಾದರೂ ಸಹಾಯ ಕೇಳಿ.',
+  emergency: {
+    en: 'Please go to the hospital emergency bay immediately. 108 ambulance transit recommended.',
+    hi: 'कृपया तुरंत अस्पताल के आपातकालीन कक्ष में जाएं। 108 एम्बुलेंस की सहायता लें।',
+    mr: 'कृपया तातडीने रुग्णालयातील आणीबाणी कक्षात जा. १०८ रुग्णवाहिकेची मदत घ्या.',
+    te: 'దయచేసి వెంటనే ఆసుపత్రి ఎమర్జెన్సీ విభాగానికి వెళ్లండి. 108 అంబులెన్స్ సహాయం తీసుకోండి.',
+    kn: 'ದಯವಿಟ್ಟು ತಕ್ಷಣ ಆಸ್ಪತ್ರೆಯ ತುರ್ತು ಚಿಕಿತ್ಸಾ ವಿಭಾಗಕ್ಕೆ ತೆರಳಿ. 108 ಆಂಬ್ಯುಲೆನ್ಸ್ ಸಹಾಯ ಪಡೆಯಿರಿ.',
   },
-  moderate: {
-    en: 'Visit the PHC or health centre today. Tell the doctor your symptoms.',
-    hi: 'आज PHC या स्वास्थ्य केंद्र जाएं। डॉक्टर को अपनी तकलीफ बताएं।',
-    mr: 'आज PHC किंवा आरोग्य केंद्राला भेट द्या. डॉक्टरांना आपले त्रास सांगा.',
-    te: 'ఈరోజు PHC లేదా ఆరోగ్య కేంద్రానికి వెళ్ళండి. డాక్టర్‌కి మీ లక్షణాలు చెప్పండి.',
-    kn: 'ಇಂದೇ PHC ಅಥವಾ ಆರೋಗ್ಯ ಕೇಂದ್ರಕ್ಕೆ ಭೇಟಿ ನೀಡಿ. ವೈದ್ಯರಿಗೆ ನಿಮ್ಮ ಸಮಸ್ಯೆ ತಿಳಿಸಿ.',
+  urgent: {
+    en: 'Visit the PHC or Community Health Centre today. A medical officer should evaluate you promptly.',
+    hi: 'आज ही PHC या सामुदायिक स्वास्थ्य केंद्र जाएं। चिकित्सा अधिकारी से शीघ्र जांच कराएं।',
+    mr: 'आजच प्राथमिक आरोग्य केंद्र किंवा ग्रामीण रुग्णालयाला भेट द्या. वैद्यकीय अधिकाऱ्यांकडून त्वरित तपासणी करून घ्या.',
+    te: 'ఈరోజే PHC లేదా ఆరోగ్య కేంద్రానికి వెళ్లండి. వైద్యుడిని సంప్రదించండి.',
+    kn: 'ಇಂದೇ PHC ಅಥವಾ ಸಮುದಾಯ ಆರೋಗ್ಯ ಕೇಂದ್ರಕ್ಕೆ ಭೇಟಿ ನೀಡಿ. ವೈದ್ಯರಿಂದ ತಪಾಸಣೆ ಮಾಡಿಸಿಕೊಳ್ಳಿ.',
   },
-  low: {
-    en: 'You can visit the PHC at the next available time. Rest and drink water.',
-    hi: 'आप अगली उपलब्ध समय पर PHC जा सकते हैं। आराम करें और पानी पिएं।',
-    mr: 'पुढील वेळेत PHC ला जाऊ शकता. विश्रांती घ्या आणि पाणी प्या.',
-    te: 'మీరు వీలైనప్పుడు PHC ని సందర్శించవచ్చు. విశ్రాంతి తీసుకోండి మరియు నీరు త్రాగండి.',
-    kn: 'ಮುಂದಿನ ಅನುಕೂಲಕರ ಸಮಯದಲ್ಲಿ PHC ಗೆ ಭೇಟಿ ನೀಡಬಹುದು. ವಿಶ್ರಾಂತಿ ಪಡೆಯಿರಿ ಮತ್ತು ನೀರು ಕುಡಿಯಿರಿ.',
+  routine: {
+    en: 'You can visit the PHC at the next outpatient clinic hours. Rest and maintain hydration.',
+    hi: 'आप अगले ओपीडी समय में PHC जा सकते हैं। आराम करें और पर्याप्त पानी पिएं।',
+    mr: 'पुढील ओपीडी वेळेत प्राथमिक आरोग्य केंद्राला भेट देऊ शकता. विश्रांती घ्या आणि भरपूर पाणी प्या.',
+    te: 'మీరు తదుపరి OPD సమయంలో PHC ని సందర్శించవచ్చు. విశ్రాంతి తీసుకోండి మరియు నీరు త్రాగండి.',
+    kn: 'ಮುಂದಿನ OPD ಸಮಯದಲ್ಲಿ ನೀವು PHC ಗೆ ಭೇಟಿ ನೀಡಬಹುದು. ವಿಶ್ರಾಂತಿ ಪಡೆಯಿರಿ ಮತ್ತು ನೀರು ಕುಡಿಯಿರಿ.',
   },
+  home_care: {
+    en: 'Self-limiting symptoms observed. Follow home care advice, rest, and follow up if symptoms worsen.',
+    hi: 'सामान्य लक्षण हैं। घरेलू देखभाल के उपायों का पालन करें और लक्षण बढ़ने पर जांच कराएं।',
+    mr: 'सामान्य व सौम्य लक्षणे आहेत. घरगुती काळजी घ्या आणि त्रास वाढल्यास आरोग्य केंद्रात या.',
+    te: 'సాధారణ లక్షణాలు మాత్రమే ఉన్నాయి. ఇంటి వద్ద విశ్రాంతి తీసుకోండి, ఇబ్బంది పెరిగితే సంప్రదించండి.',
+    kn: 'ಸಾಮಾನ್ಯ ಲಕ್ಷಣಗಳು. ಮನೆಯಲ್ಲೇ ಕಾಳಜಿ ವಹಿಸಿ, ಸಮಸ್ಯೆ ಉಲ್ಬಣಿಸಿದರೆ ಸಂಪರ್ಕಿಸಿ.',
+  }
 };
 
-/**
- * Multilingual ASHA checklists per urgency level.
- * @type {Record<string, Record<string, string>>}
- */
 const ASHA_MSG = {
-  high: {
-    en: '• Call 108 immediately\n• Stay with patient\n• Note pulse and breathing\n• Inform PHC doctor now',
-    hi: '• तुरंत 108 पर कॉल करें\n• मरीज़ के साथ रहें\n• नाड़ी और श्वास नोट करें\n• PHC डॉक्टर को अभी सूचित करें',
-    mr: '• लगेच 108 वर कॉल करा\n• रुग्णाजवळ थांबा\n• नाडी व श्वास नोंदवा\n• PHC डॉक्टरांना आत्ताच कळवा',
-    te: '• వెంటనే 108 కి కాల్ చేయండి\n• రోగి వద్దే ఉండండి\n• నాడి మరియు శ్వాసను గమనించండి\n• PHC డాక్టర్‌కి ఇప్పుడే సమాచారం ఇవ్వండి',
-    kn: '• ತಕ್ಷಣ 108 ಗೆ ಕರೆ ಮಾಡಿ\n• ರೋಗಿಯ ಜೊತೆಯೇ ಇರಿ\n• ನಾಡಿ ಮತ್ತು ಉಸಿರಾಟವನ್ನು ಗಮನಿಸಿ\n• PHC ವೈದ್ಯರಿಗೆ ತಕ್ಷಣ ಮಾಹಿತಿ ನೀಡಿ',
+  emergency: {
+    en: '• Call 108 immediately\n• Stay with patient and monitor vitals\n• Green channel transfer to District Hospital\n• Inform PHC Medical Officer',
+    hi: '• तुरंत 108 पर कॉल करें\n• मरीज के साथ रहें और वाइटल चेक करें\n• जिला अस्पताल के लिए ग्रीन चैनल रेफरल\n• PHC डॉक्टर को सूचित करें',
+    mr: '• लगेच १०८ रुग्णवाहिका बोलवा\n• रुग्णासोबत रहा व नाडी/श्वास तपासा\n• जिल्हा रुग्णालयात तातडीने हलवा\n• वैद्यकीय अधिकाऱ्यांना कळवा',
+    te: '• వెంటనే 108 కి కాల్ చేయండి\n• రోగి వద్ద ఉండి వైటల్స్ గమనించండి\n• జిల్లా ఆసుపత్రికి తక్షణ బదిలీ\n• వైద్యాధికారికి తెలియజేయండి',
+    kn: '• ತಕ್ಷಣ 108 ಕರೆ ಮಾಡಿ\n• ರೋಗಿಯ ಜೊತೆಗಿದ್ದು ವೈಟಲ್ಸ್ ಗಮನಿಸಿ\n• ಜಿಲ್ಲಾ ಆಸ್ಪತ್ರೆಗೆ ತುರ್ತು ವರ್ಗಾವಣೆ\n• ವೈದ್ಯಾಧಿಕಾರಿಗೆ ಮಾಹಿತಿ ನೀಡಿ',
   },
-  moderate: {
-    en: '• Arrange transport to PHC today\n• Record vitals (BP, temp, pulse)\n• Check pregnancy status\n• Log visit in ASHA diary',
-    hi: '• आज PHC जाने की व्यवस्था करें\n• वाइटल्स रिकॉर्ड करें (BP, तापमान, नाड़ी)\n• गर्भावस्था जांचें\n• ASHA डायरी में नोट करें',
-    mr: '• आज PHC ला जाण्याची सोय करा\n• व्हायटल्स नोंदवा (BP, तापमान, नाडी)\n• गर्भावस्था तपासा\n• ASHA डायरीत नोंद करा',
-    te: '• ఈరోజు PHC కి రవాణా ఏర్పాటు చేయండి\n• వైటల్స్ (BP, ఉష్ణోగ్రత, పల్స్) నమోదు చేయండి\n• గర్భధారణ స్థితిని తనిఖీ చేయండి\n• ఆశా డైరీలో నమోదు చేయండి',
-    kn: '• ಇಂದೇ PHC ಗೆ ವಾಹನ ವ್ಯವಸ್ಥೆ ಮಾಡಿ\n• ವೈಟಲ್ಸ್ (BP, ಉಷ್ಣಾಂಶ, ನಾಡಿ) ದಾಖಲಿಸಿ\n• ಗರ್ಭಾವಸ್ಥೆ ಸ್ಥಿತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ\n• ಆಶಾ ಡೈರಿಯಲ್ಲಿ ನಮೂದಿಸಿ',
+  urgent: {
+    en: '• Escort to PHC for same-day evaluation\n• Check BP, temperature and SpO2\n• Ensure maternal danger sign protocol if pregnant',
+    hi: '• आज ही जांच के लिए PHC ले जाएं\n• बीपी, तापमान और SpO2 चेक करें\n• गर्भवती होने पर खतरे के संकेतों पर नजर रखें',
+    mr: '• आजच तपासणीसाठी प्राथमिक आरोग्य केंद्रात आणा\n• रक्तदाब, तापमान आणि SpO2 तपासा\n• गरोदर माता असल्यास धोक्याच्या लक्षणांवर लक्ष ठेवा',
+    te: '• ఈరోజే PHC కి తీసుకువెళ్లండి\n• BP, జ్వరం మరియు SpO2 పరీక్షించండి\n• గర్భిణీ అయితే అప్రమత్తంగా ఉండండి',
+    kn: '• ಇಂದೇ PHC ಗೆ ಕರೆದೊಯ್ಯಿರಿ\n• BP, ತಾಪಮಾನ ಮತ್ತು SpO2 ಪರಿಶೀಲಿಸಿ\n• ಗರ್ಭಿಣಿಯಾಗಿದ್ದರೆ ಎಚ್ಚರಿಕೆ ವಹಿಸಿ',
   },
-  low: {
-    en: '• Schedule next PHC visit\n• Advise rest and fluids\n• Monitor for 48 hours\n• Revisit if worsens',
-    hi: '• अगली PHC यात्रा निर्धारित करें\n• आराम और पानी की सलाह दें\n• 48 घंटे निगरानी रखें\n• बिगड़ने पर दोबारा जाएं',
-    mr: '• पुढील PHC भेट ठरवा\n• विश्रांती व पाणी पिण्याचा सल्ला द्या\n• ४८ तास निरीक्षण करा\n• स्थिती बिघडल्यास पुन्हा भेट द्या',
-    te: '• తదుపరి PHC సందర్శనను షెడ్యూల్ చేయండి\n• విశ్రాంతి మరియు ద్రవాలు తీసుకోవాలని సూచించండి\n• 48 గంటలు పర్యవేక్షించండి\n• తీవ్రమైతే మళ్లీ రండి',
-    kn: '• ಮುಂದಿನ PHC ಭೇಟಿ ನಿಗದಿಪಡಿಸಿ\n• ವಿಶ್ರಾಂತಿ ಮತ್ತು ದ್ರವಾಹಾರ ಸೇವಿಸಲು ಸಲಹೆ ನೀಡಿ\n• 48 ಗಂಟೆಗಳ ಕಾಲ ಗಮನಿಸಿ\n• ಸಮಸ್ಯೆ ಹೆಚ್ಚಾದರೆ ಮರುಭೇಟಿ ನೀಡಿ',
+  routine: {
+    en: '• Schedule routine OPD visit\n• Follow-up within 48-72 hours if no improvement\n• Counsel on hydration and hygiene',
+    hi: '• नियमित ओपीडी का समय निर्धारित करें\n• सुधार न होने पर 48-72 घंटे में फॉलो-अप\n• स्वच्छता और खानपान की सलाह दें',
+    mr: '• नियमित ओपीडी भेट नोंदवा\n• गुण न आल्यास ४८-७२ तासांत पाठपुरावा करा\n• आहाराबाबत मार्गदर्शन करा',
+    te: '• సాధారణ OPD సందర్శన నిర్ణయించండి\n• ఉపశమనం లేకపోతే 48-72 గంటల్లో ఫాలో-అప్ చేయండి',
+    kn: '• ವಾಡಿಕೆಯ OPD ಭೇಟಿ ನಿಗದಿಪಡಿಸಿ\n• ಸುಧಾರಣೆ ಇಲ್ಲದಿದ್ದರೆ 48-72 ಗಂಟೆಗಳಲ್ಲಿ ಫಾಲೋ-ಅಪ್ ಮಾಡಿ',
   },
+  home_care: {
+    en: '• Educate on home hydration and rest\n• Alert family to red flags (high fever, breathlessness)\n• Routine community visit check next week',
+    hi: '• पर्याप्त पानी पीने और आराम की सलाह दें\n• खतरे के संकेतों के प्रति सचेत करें\n• अगले सप्ताह रूटीन फॉलो-अप',
+    mr: '• घरगुती विश्रांती व द्रव पदार्थांचा सल्ला द्या\n• धोक्याची लक्षणे आढळल्यास लगेच केंद्रात येण्यास सांगा\n• पुढील आठवड्यात आढावा घ्या',
+    te: '• విశ్రాంతి మరియు ఆహార జాగ్రత్తలు తెలపండి\n• లక్షణాలు ఎక్కువైతే వెంటనే రమ్మని చెప్పండి',
+    kn: '• ಮನೆಯಲ್ಲಿ ವಿಶ್ರಾಂತಿ ಪಡೆಯಲು ತಿಳಿಸಿ\n• ತುರ್ತು ಲಕ್ಷಣಗಳಿದ್ದರೆ ತಕ್ಷಣ ತಿಳಿಸಲು ಸೂಚಿಸಿ',
+  }
 };
 
 /**
- * Match keywords in a lower-cased combined string.
- * @param {string} text
- * @param {string[]} keywords
- * @returns {boolean}
- */
-function hasKeyword(text, keywords) {
-  return keywords.some(k => text.includes(k));
-}
-
-/**
- * Deterministic triage fallback — same schema as real lnkling response.
- *
- * @param {import('./types.js').LnklingInput} input
- * @returns {import('./types.js').LnklingTriageResult}
+ * Deterministic triage fallback — conforms to unified urgency schema.
  */
 export function fallbackMock(input) {
   const lang = ['en', 'hi', 'mr', 'te', 'kn'].includes(input.language) ? input.language : 'en';
-  const text = [input.chiefComplaint || '', input.notes || ''].join(' ').toLowerCase();
-  const temp = Number(input.temperature) || 0;
-  const pregnant = Boolean(input.pregnant);
+  const chiefComplaint = input.chiefComplaint || '';
+  const notes = input.notes || '';
+  const symptoms = chiefComplaint.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
 
-  // ─── Rule 1: Pregnancy escalation ────────────────────────────────
-  if (pregnant && hasKeyword(text, [
-      'fever', 'pain', 'bleeding', 'swelling', 'headache', 'dizzy',
-      'बुखार', 'दर्द', 'रक्तस्राव', 'सूजन', 'ताप', 'दुखणे', 'सूज', 'रक्तस्त्राव',
-      'జ్వరం', 'నొప్పి', 'రక్తస్రావం', 'వాపు', 'తలనొప్పి', 'గర్భవతి',
-      'ಜ್ವರ', 'ನೋವು', 'ರಕ್ತಸ್ರಾವ', 'ಊತ', 'ತಲೆನೋವು', 'ಗರ್ಭಿಣಿ'
-    ]) || (pregnant && temp >= 38)) {
-    return {
-      urgency: 'high',
-      opDepartment: 'Obstetrics & Gynaecology',
-      priority: 'emergency',
-      specialty: 'Obstetrics & Gynaecology',
-      reasons: ['Pregnancy with fever, elevated BP or pain requires immediate evaluation', 'Risk of pre-eclampsia or maternal infection'],
-      suggestedDiagnostics: ['BP measurement', 'Urine protein dipstick', 'Fetal Doppler', 'CBC test'],
-      patientMessage: PATIENT_MSG.high[lang] || PATIENT_MSG.high.en,
-      ashaMessage: ASHA_MSG.high[lang] || ASHA_MSG.high.en,
-      language: lang,
-      model: 'lnkling',
-      disclaimer: DISCLAIMER,
-      offline: true,
-    };
-  }
+  const vitals = {
+    temp: input.temperature || (notes.match(/temp[:\s]+([\d.]+)/i)?.[1]),
+    spo2: notes.match(/spo2[:\s]+([\d.]+)/i)?.[1],
+    bp: notes.match(/bp[:\s]+([\d/]+)/i)?.[1]
+  };
 
-  // ─── Rule 2: Emergency red-flag symptoms ─────────────────────────
-  if (hasKeyword(text, [
-      'chest pain', 'unconscious', 'seizure', 'convulsion', 'paralysis', 'severe bleeding',
-      'छातीत दुखणे', 'सीने में दर्द', 'बेहोश', 'अपस्मार', 'बेशुद्ध', 'आकडी',
-      'గుండె నొప్పి', 'ఛాతీ నొప్పి', 'స్పృహ తప్పడం', 'ఫిట్స్', 'పక్షవాతం',
-      'ಎದೆ ನೋವು', 'ಪ್ರಜ್ಞಾಹೀನತೆ', 'ಫಿಟ್ಸ್', 'ಪಾರ್ಶ್ವವಾಯು'
-    ])) {
-    return {
-      urgency: 'high',
-      opDepartment: 'Emergency',
-      priority: 'emergency',
-      specialty: 'Emergency Medicine',
-      reasons: ['Emergency red-flag symptom reported', 'Requires immediate hospital stabilization and ICU bed'],
-      suggestedDiagnostics: ['12-lead ECG', 'Blood glucose', 'Continuous vitals monitoring', 'Cardiac enzymes'],
-      patientMessage: PATIENT_MSG.high[lang] || PATIENT_MSG.high.en,
-      ashaMessage: ASHA_MSG.high[lang] || ASHA_MSG.high.en,
-      language: lang,
-      model: 'lnkling',
-      disclaimer: DISCLAIMER,
-      offline: true,
-    };
-  }
+  const patient = {
+    age: input.age,
+    isPregnant: Boolean(input.pregnant)
+  };
 
-  // ─── Rule 3: Moderate — fever / respiratory / spo2 ───────────────
-  if (hasKeyword(text, [
-      'fever', 'breathless', 'cough', 'difficulty breathing', 'malaria', 'dengue',
-      'ताप', 'बुखार', 'खोकला', 'श्वास', 'सांस',
-      'జ్వరం', 'దగ్గు', 'శ్వాస తీసుకోవడంలో ఇబ్బంది', 'మలేరియా', 'డెంగ్యూ',
-      'ಜ್ವರ', 'ಕೆಮ್ಮು', 'ಉಸಿರಾಟದ ತೊಂದರೆ', 'ಮಲೇರಿಯಾ', 'ಡೆಂಗ್ಯೂ'
-    ]) || temp >= 38) {
-    return {
-      urgency: 'moderate',
-      opDepartment: 'General OPD & Diagnostic Lab',
-      priority: 'priority',
-      specialty: 'General Medicine',
-      reasons: ['Fever or respiratory symptoms present', 'Lab tests recommended to rule out endemic infections'],
-      suggestedDiagnostics: ['Malaria rapid test', 'Dengue NS1 antigen', 'CBC analyzer', 'Temperature monitoring'],
-      patientMessage: PATIENT_MSG.moderate[lang] || PATIENT_MSG.moderate.en,
-      ashaMessage: ASHA_MSG.moderate[lang] || ASHA_MSG.moderate.en,
-      language: lang,
-      model: 'lnkling',
-      disclaimer: DISCLAIMER,
-      offline: true,
-    };
-  }
+  const decision = buildClinicalDecision({
+    symptoms,
+    symptomNarrative: notes,
+    vitals,
+    patient
+  });
 
-  // ─── Rule 4: Low — routine / default ─────────────────────────────
+  const urgency = decision.urgency; // 'emergency' | 'urgent' | 'routine' | 'home_care'
+  const priority = urgency === 'emergency' ? 'emergency' : urgency === 'urgent' ? 'priority' : 'normal';
+
   return {
-    urgency: 'low',
-    opDepartment: 'General OPD',
-    priority: 'normal',
-    specialty: 'General Medicine',
-    reasons: ['Symptoms appear routine', 'PHC visit recommended'],
-    suggestedDiagnostics: ['BP check', 'Blood glucose'],
-    patientMessage: PATIENT_MSG.low[lang] || PATIENT_MSG.low.en,
-    ashaMessage: ASHA_MSG.low[lang] || ASHA_MSG.low.en,
+    urgency,
+    opDepartment: decision.department,
+    priority,
+    specialty: decision.department,
+    reasons: decision.redFlags.length ? decision.redFlags : [decision.summary],
+    suggestedDiagnostics: decision.recommendations.map(r => r.name),
+    patientMessage: PATIENT_MSG[urgency]?.[lang] || PATIENT_MSG[urgency]?.en || PATIENT_MSG.routine.en,
+    ashaMessage: ASHA_MSG[urgency]?.[lang] || ASHA_MSG[urgency]?.en || ASHA_MSG.routine.en,
     language: lang,
     model: 'lnkling',
     disclaimer: DISCLAIMER,
     offline: true,
+    safetyFloorTriggered: decision.safetyFloorTriggered
   };
 }

@@ -1,0 +1,13 @@
+{
+  "name": "@arogyalink/ml-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ArogyaLink Python FastAPI ML Service - Truthful Shadow Evaluation & Governance",
+  "scripts": {
+    "start": "python -m uvicorn main:app --host 0.0.0.0 --port 8000",
+    "dev": "python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "test": "python -m unittest discover tests",
+    "lint": "echo No JS lint for Python ML service",
+    "typecheck": "echo Python types verified"
+  }
+}

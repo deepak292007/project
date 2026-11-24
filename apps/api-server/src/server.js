@@ -334,6 +334,9 @@ app.get('/api/health', (req, res) => res.json({
 }));
 
 // ─── Authentication API (Login, Refresh, Logout, Users list, Registration) ───
+// Constant-time scrypt hash of 'Password@123' for secure static demo user verification
+const DEMO_PASSWORD_HASH = 'scrypt$634c5652c0def20185d3be8bc2f67ea8$3d8609ba5ff203208fd06b02e5270bf5e330295df72ff79c473647debab1aefb7ef53a80729ce86961c9b1f46df1b9b2769701428dfc84952d86247a440da567';
+
 app.post('/api/auth/login', loginLimiter, asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -345,14 +348,26 @@ app.post('/api/auth/login', loginLimiter, asyncHandler(async (req, res) => {
   if (dbOk()) {
     const user = await User.findOne({ email: cleanEmail }).select('+password +passwordHash +refreshTokenHash +failedLoginAttempts +lockedUntil');
     if (!user) {
-      // In development demo mode only, fallback to USERS_DATA for instant onboarding
+      // In development demo mode only, fallback to USERS_DATA for instant onboarding using scrypt
       const staticUser = USERS_DATA.find(u => u.email.toLowerCase() === cleanEmail);
-      if (DEMO_MODE && staticUser && staticUser.password === password) {
-        const tokenPayload = { sub: staticUser.email, role: staticUser.role, name: staticUser.name, facilityId: staticUser.facilityId };
-        const accessToken = signAccessToken(tokenPayload);
-        const refreshToken = signRefreshToken(staticUser.email);
-        res.cookie('al_refresh', refreshToken, { httpOnly: true, secure: IS_PRODUCTION, sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000 });
-        return res.json({ ok: true, user: publicUser(staticUser), accessToken, tokenType: 'Bearer' });
+      if (DEMO_MODE && staticUser) {
+        const hash = staticUser.passwordHash || DEMO_PASSWORD_HASH;
+        const valid = await verifyPassword(password, hash);
+        if (valid) {
+          const tokenPayload = {
+            sub: staticUser.email,
+            role: staticUser.role,
+            name: staticUser.name,
+            facilityId: staticUser.facilityId,
+            districtId: staticUser.districtId || 'Palghar',
+            patientId: staticUser.patientId,
+            assignedHouseholds: staticUser.assignedHouseholds || []
+          };
+          const accessToken = signAccessToken(tokenPayload);
+          const refreshToken = signRefreshToken(staticUser.email);
+          res.cookie('al_refresh', refreshToken, { httpOnly: true, secure: IS_PRODUCTION, sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000 });
+          return res.json({ ok: true, user: publicUser(staticUser), accessToken, tokenType: 'Bearer' });
+        }
       }
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -361,8 +376,8 @@ app.post('/api/auth/login', loginLimiter, asyncHandler(async (req, res) => {
       return res.status(423).json({ error: 'Account locked due to consecutive failed login attempts. Please try again later.' });
     }
 
-    const passwordValid = (user.passwordHash && await verifyPassword(password, user.passwordHash))
-      || (DEMO_MODE && user.password === password);
+    // Require secure scrypt verification — plaintext passwords strictly rejected
+    const passwordValid = user.passwordHash ? await verifyPassword(password, user.passwordHash) : false;
 
     if (!passwordValid) {
       if (user.incrementFailedLogin) await user.incrementFailedLogin();
@@ -405,11 +420,23 @@ app.post('/api/auth/login', loginLimiter, asyncHandler(async (req, res) => {
       tokenType: 'Bearer'
     });
   } else {
-    // Offline Memory Fallback
+    // Offline Memory Fallback — also enforces secure scrypt verification
     const staticUser = USERS_DATA.find(u => u.email.toLowerCase() === cleanEmail);
-    if (DEMO_MODE && staticUser && staticUser.password === password) {
-      const accessToken = signAccessToken({ sub: staticUser.email, role: staticUser.role, name: staticUser.name });
-      return res.json({ ok: true, user: publicUser(staticUser), accessToken, tokenType: 'Bearer' });
+    if (DEMO_MODE && staticUser) {
+      const hash = staticUser.passwordHash || DEMO_PASSWORD_HASH;
+      const valid = await verifyPassword(password, hash);
+      if (valid) {
+        const accessToken = signAccessToken({
+          sub: staticUser.email,
+          role: staticUser.role,
+          name: staticUser.name,
+          facilityId: staticUser.facilityId,
+          districtId: staticUser.districtId || 'Palghar',
+          patientId: staticUser.patientId,
+          assignedHouseholds: staticUser.assignedHouseholds || []
+        });
+        return res.json({ ok: true, user: publicUser(staticUser), accessToken, tokenType: 'Bearer' });
+      }
     }
     return res.status(401).json({ error: 'Invalid email or password' });
   }
@@ -467,7 +494,7 @@ app.post('/api/auth/logout', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ ok: true, message: 'Logged out successfully' });
 }));
 
-app.get('/api/auth/users', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/auth/users', requireAuth, requireRoles('district_admin', 'hospital_admin', 'phc_doctor', 'hospital_doctor'), asyncHandler(async (req, res) => {
   const { role } = req.query;
   const filter = {};
   if (role) filter.role = role;
@@ -694,9 +721,23 @@ app.post('/api/devices/register', asyncHandler(async (req, res) => {
 }));
 
 // ─── Patients API ─────────────────────────────────────────────────────────────
-app.get('/api/patients', optionalAuth, asyncHandler(async (req, res) => {
-  if (!dbOk()) return res.json({ data: inMemPatients });
+app.get('/api/patients', requireAuth, asyncHandler(async (req, res) => {
   const { asha, risk, q } = req.query;
+  if (!dbOk()) {
+    let list = [...inMemPatients];
+    if (req.user?.role === 'patient') {
+      list = list.filter(p => p._id === req.user.patientId || p.email === req.user.sub);
+    } else if (req.user?.role === 'asha' && req.user.assignedHouseholds?.length) {
+      list = list.filter(p => req.user.assignedHouseholds.includes(p._id));
+    }
+    if (risk) list = list.filter(p => p.riskCategory === risk);
+    if (q) {
+      const cleanQ = q.toLowerCase();
+      list = list.filter(p => p.name?.toLowerCase().includes(cleanQ) || p.abhaId?.toLowerCase().includes(cleanQ));
+    }
+    return res.json({ data: list });
+  }
+
   const filter = {};
 
   // Enforce ASHA privacy scope: if ASHA user, show only assigned households
@@ -707,7 +748,8 @@ app.get('/api/patients', optionalAuth, asyncHandler(async (req, res) => {
   }
 
   // Enforce Patient privacy scope: patients see only themselves
-  if (req.user?.role === 'patient' && req.user.patientId) {
+  if (req.user?.role === 'patient') {
+    if (!req.user.patientId) return res.json({ data: [] });
     filter._id = req.user.patientId;
   }
 
@@ -720,7 +762,7 @@ app.get('/api/patients', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ data });
 }));
 
-app.get('/api/patients/:id', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:id', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const found = inMemPatients.find(p => p._id === req.params.id || p.name === req.params.id || p.abhaId === req.params.id);
     return found ? res.json({ data: found }) : res.status(404).json({ error: 'Patient not found' });
@@ -730,7 +772,7 @@ app.get('/api/patients/:id', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ data: p });
 }));
 
-app.post('/api/patients', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/patients', requireAuth, requireWriteScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const newPat = {
       _id: `pat-${Date.now()}`,
@@ -755,7 +797,7 @@ app.post('/api/patients', optionalAuth, asyncHandler(async (req, res) => {
   res.status(201).json({ data: p });
 }));
 
-app.patch('/api/patients/:id', optionalAuth, asyncHandler(async (req, res) => {
+app.patch('/api/patients/:id', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const idx = inMemPatients.findIndex(p => p._id === req.params.id || p.name === req.params.id);
     if (idx !== -1) {
@@ -770,9 +812,12 @@ app.patch('/api/patients/:id', optionalAuth, asyncHandler(async (req, res) => {
 }));
 
 // ─── Encounters API ────────────────────────────────────────────────────────────
-app.get('/api/encounters', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/encounters', requireAuth, asyncHandler(async (req, res) => {
   if (!dbOk()) {
     let list = [...inMemEncounters];
+    if (req.user?.role === 'patient') {
+      list = list.filter(e => e.patientId === req.user.patientId);
+    }
     const { patientName, patientId, facilityId, status } = req.query;
     if (patientName) {
       list = list.filter(e => e.patientName?.toLowerCase().includes(patientName.toLowerCase()) || e.chiefComplaint?.toLowerCase().includes(patientName.toLowerCase()));
@@ -790,12 +835,16 @@ app.get('/api/encounters', optionalAuth, asyncHandler(async (req, res) => {
   }
   const { patientId, patientName, abhaId, facilityId, status } = req.query;
   const filter = {};
-  if (patientId) filter.patientId = patientId;
-  if (facilityId) filter.facilityId = facilityId;
+  if (req.user?.role === 'patient') {
+    filter.patientId = req.user.patientId || '__none__';
+  } else {
+    if (patientId) filter.patientId = patientId;
+    if (facilityId) filter.facilityId = facilityId;
+  }
   if (status) filter.status = status;
   if (abhaId) filter.abhaId = abhaId;
   
-  if (patientName && !patientId) {
+  if (patientName && !patientId && req.user?.role !== 'patient') {
     const patientDoc = await Patient.findOne({ name: new RegExp(patientName.trim(), 'i') });
     if (patientDoc) {
       filter.$or = [{ patientId: patientDoc._id }, { abhaId: patientDoc.abhaId }];
@@ -806,7 +855,7 @@ app.get('/api/encounters', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ data });
 }));
 
-app.post('/api/encounters', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/encounters', requireAuth, requireWriteScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const newEnc = {
       _id: `enc-${Date.now()}`,
@@ -824,7 +873,7 @@ app.post('/api/encounters', optionalAuth, asyncHandler(async (req, res) => {
   res.status(201).json({ data: e });
 }));
 
-app.patch('/api/encounters/:id', optionalAuth, asyncHandler(async (req, res) => {
+app.patch('/api/encounters/:id', requireAuth, requireWriteScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const idx = inMemEncounters.findIndex(e => e._id === req.params.id);
     if (idx !== -1) {
@@ -839,10 +888,19 @@ app.patch('/api/encounters/:id', optionalAuth, asyncHandler(async (req, res) => 
 }));
 
 // ─── Referrals API ────────────────────────────────────────────────────────────
-app.get('/api/referrals', optionalAuth, asyncHandler(async (req, res) => {
-  if (!dbOk()) return res.json({ data: inMemReferrals });
+app.get('/api/referrals', requireAuth, asyncHandler(async (req, res) => {
+  if (!dbOk()) {
+    let list = [...inMemReferrals];
+    if (req.user?.role === 'patient') {
+      list = list.filter(r => r.patientId === req.user.patientId);
+    }
+    return res.json({ data: list });
+  }
   const { toFacilityId, fromFacilityId, stage, urgency } = req.query;
   const filter = {};
+  if (req.user?.role === 'patient') {
+    filter.patientId = req.user.patientId || '__none__';
+  }
   if (toFacilityId) filter.toFacilityId = toFacilityId;
   if (fromFacilityId) filter.fromFacilityId = fromFacilityId;
   if (stage) filter.currentStage = stage;
@@ -851,7 +909,7 @@ app.get('/api/referrals', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ data });
 }));
 
-app.post('/api/referrals', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/referrals', requireAuth, requireRoles('phc_doctor', 'hospital_doctor', 'hospital_admin', 'district_admin', 'asha'), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const newRef = {
       _id: `ref-${Date.now()}`,
@@ -871,7 +929,7 @@ app.post('/api/referrals', optionalAuth, asyncHandler(async (req, res) => {
   res.status(201).json({ data: r });
 }));
 
-app.patch('/api/referrals/:id/stage', optionalAuth, asyncHandler(async (req, res) => {
+app.patch('/api/referrals/:id/stage', requireAuth, requireRoles('phc_doctor', 'hospital_doctor', 'hospital_admin', 'district_admin', 'asha'), asyncHandler(async (req, res) => {
   const { stage, updatedBy, role, notes, ambulanceNumber, driverPhone } = req.body;
   if (!dbOk()) {
     const found = inMemReferrals.find(r => r._id === req.params.id);
@@ -900,13 +958,13 @@ app.patch('/api/referrals/:id/stage', optionalAuth, asyncHandler(async (req, res
 }));
 
 // ─── Longitudinal Records (Observations, Conditions, Consents, CarePlans, Orders) ──
-app.get('/api/patients/:patientId/observations', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/observations', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) return res.json({ data: inMemObservations.filter(o => o.patientId === req.params.patientId) });
   const data = await Observation.find({ patientId: req.params.patientId }).sort({ recordedAt: -1 }).limit(100);
   res.json({ data });
 }));
 
-app.post('/api/patients/:patientId/observations', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/patients/:patientId/observations', requireAuth, requireWriteScope(), requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const doc = { _id: `obs-${Date.now()}`, ...req.body, patientId: req.params.patientId, recordedAt: new Date() };
     inMemObservations.unshift(doc);
@@ -916,13 +974,13 @@ app.post('/api/patients/:patientId/observations', optionalAuth, asyncHandler(asy
   res.status(201).json({ data: doc });
 }));
 
-app.get('/api/patients/:patientId/conditions', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/conditions', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) return res.json({ data: inMemConditions.filter(c => c.patientId === req.params.patientId) });
   const data = await Condition.find({ patientId: req.params.patientId }).sort({ recordedDate: -1 });
   res.json({ data });
 }));
 
-app.post('/api/patients/:patientId/conditions', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/patients/:patientId/conditions', requireAuth, requireWriteScope(), requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const doc = { _id: `cond-${Date.now()}`, ...req.body, patientId: req.params.patientId, recordedDate: new Date() };
     inMemConditions.unshift(doc);
@@ -932,13 +990,13 @@ app.post('/api/patients/:patientId/conditions', optionalAuth, asyncHandler(async
   res.status(201).json({ data: doc });
 }));
 
-app.get('/api/patients/:patientId/consents', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/consents', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) return res.json({ data: inMemConsents.filter(c => c.patientId === req.params.patientId) });
   const data = await Consent.find({ patientId: req.params.patientId, status: 'active' });
   res.json({ data });
 }));
 
-app.post('/api/patients/:patientId/consents', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/patients/:patientId/consents', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const doc = { _id: `cons-${Date.now()}`, ...req.body, patientId: req.params.patientId, status: 'active' };
     inMemConsents.unshift(doc);
@@ -948,13 +1006,13 @@ app.post('/api/patients/:patientId/consents', optionalAuth, asyncHandler(async (
   res.status(201).json({ data: doc });
 }));
 
-app.get('/api/patients/:patientId/care-plans', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/care-plans', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) return res.json({ data: inMemCarePlans.filter(c => c.patientId === req.params.patientId) });
   const data = await CarePlan.find({ patientId: req.params.patientId }).sort({ createdAt: -1 });
   res.json({ data });
 }));
 
-app.get('/api/patients/:patientId/prescriptions', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/prescriptions', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const found = inMemPrescriptions.filter(p => !req.params.patientId || p.patientId === req.params.patientId);
     return res.json({ data: found });
@@ -963,7 +1021,7 @@ app.get('/api/patients/:patientId/prescriptions', optionalAuth, asyncHandler(asy
   res.json({ data });
 }));
 
-app.post('/api/prescriptions', optionalAuth, asyncHandler(async (req, res) => {
+app.post('/api/prescriptions', requireAuth, requireRoles('phc_doctor', 'hospital_doctor', 'hospital_admin', 'district_admin'), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     const doc = {
       _id: `rx-${Date.now()}`,
@@ -1032,7 +1090,7 @@ app.post('/api/facilities/:id/capacity-snapshot', optionalAuth, asyncHandler(asy
 }));
 
 // ─── Clinician-Governed Decision Support & Capacity Matching ──────────────────
-app.post('/api/ai/clinical-assessments', triageLimiter, asyncHandler(async (req, res) => {
+app.post('/api/ai/clinical-assessments', triageLimiter, requireAuth, asyncHandler(async (req, res) => {
   const {
     patientId, symptoms = [], symptomNarrative = '', vitals = {}, latitude, longitude,
     source = 'patient', capturedBy = {}, encounterId, referralId, language = 'en', consent = {}
@@ -1103,7 +1161,7 @@ app.post('/api/ai/clinical-assessments', triageLimiter, asyncHandler(async (req,
   res.status(201).json({ data: assessment });
 }));
 
-app.get('/api/patients/:patientId/clinical-assessments', asyncHandler(async (req, res) => {
+app.get('/api/patients/:patientId/clinical-assessments', requireAuth, requirePatientScope(), asyncHandler(async (req, res) => {
   if (!dbOk()) {
     return res.json({ data: inMemAssessments.filter(a => a.patientId === req.params.patientId) });
   }
@@ -1750,109 +1808,200 @@ app.post('/api/teleconsult/end', asyncHandler(async (req, res) => {
   res.json({ data: { roomId: req.body.roomId, status: 'ended' } });
 }));
 
+// ─── Multilingual AI Translation ─────────────────────────────────────────────
+app.post('/api/ai/translate', asyncHandler(async (req, res) => {
+  const { text, targetLang = 'en', sourceLang = 'en' } = req.body || {};
+
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'Valid text is required for translation' });
+  }
+
+  const supportedLangs = ['en', 'hi', 'mr', 'te', 'kn'];
+  if (!supportedLangs.includes(targetLang)) {
+    return res.status(400).json({
+      error: `Unsupported target language: ${targetLang}. Supported: ${supportedLangs.join(', ')}`
+    });
+  }
+
+  const cleanText = text.trim().slice(0, 5000);
+
+  if (targetLang === sourceLang) {
+    return res.json({
+      ok: true,
+      data: {
+        translated: cleanText,
+        sourceLang,
+        targetLang,
+        provider: 'identity'
+      }
+    });
+  }
+
+  try {
+    const translated = await translateText(cleanText, targetLang, sourceLang);
+    return res.json({
+      ok: true,
+      data: {
+        translated: translated || cleanText,
+        sourceLang,
+        targetLang,
+        provider: 'arogyalink-multilingual'
+      }
+    });
+  } catch (err) {
+    console.error('[translate] Translation error:', err.message);
+    return res.status(503).json({
+      ok: false,
+      error: 'Translation service temporarily unavailable',
+      fallback: cleanText
+    });
+  }
+}));
+
 // ─── Multilingual Clinical Decision Support / Triage ──────────────────────────
-app.post('/api/triage', triageLimiter, asyncHandler(async (req, res) => {
+app.post('/api/triage', triageLimiter, optionalAuth, asyncHandler(async (req, res) => {
   const {
     symptoms = [], vitals = {}, lang = 'en',
-    chiefComplaint, notes, pregnant, age, severity
+    chiefComplaint, notes, pregnant, age, severity,
+    patientId, facilityId, saveEncounter = false
   } = req.body;
 
-  // ── Existing rules-based CDS (always runs) ─────────────────────────────────
-  const decision = buildClinicalDecision({ symptoms, vitals });
+  // 1. Role & Patient Scope Validation
+  let validatedPatientId = null;
+  let validatedFacilityId = null;
 
-  // ── lnkling multilingual enrichment (non-blocking, feature-flagged) ─────────
+  if (req.user) {
+    if (req.user.role === 'patient') {
+      // Patient may only triage for themselves
+      if (patientId && req.user.patientId && String(patientId) !== String(req.user.patientId)) {
+        return res.status(403).json({ error: 'Patients may only request triage for their own account' });
+      }
+      validatedPatientId = req.user.patientId || patientId;
+    } else {
+      validatedPatientId = patientId || null;
+      validatedFacilityId = req.user.facilityId || facilityId || null;
+    }
+  } else {
+    // Unauthenticated request (e.g. self-check kiosk)
+    validatedPatientId = patientId || null;
+    validatedFacilityId = facilityId || null;
+  }
+
+  // 2. If a patientId is explicitly provided, it MUST exist in the system. Never silently fallback.
+  let targetPatient = null;
+  if (validatedPatientId) {
+    if (dbOk()) {
+      targetPatient = await Patient.findById(validatedPatientId).lean().catch(() => null);
+    } else {
+      targetPatient = inMemPatients.find(p => p._id === validatedPatientId || p.abhaId === validatedPatientId);
+    }
+    if (!targetPatient) {
+      return res.status(404).json({ error: `Patient not found with ID: ${validatedPatientId}` });
+    }
+  }
+
+  // 3. If facilityId is explicitly provided, validate it exists
+  if (validatedFacilityId) {
+    let targetFacility = null;
+    if (dbOk()) {
+      targetFacility = await Facility.findById(validatedFacilityId).lean().catch(() => null);
+    } else {
+      targetFacility = FACILITIES.find(f => f._id === validatedFacilityId || f.facilityId === validatedFacilityId);
+    }
+    if (!targetFacility) {
+      return res.status(400).json({ error: `Facility not found with ID: ${validatedFacilityId}` });
+    }
+  }
+
+  // 4. Run authoritative Rules-based CDS (Always runs, defines safety floor)
+  const isPregnant = Boolean(pregnant || targetPatient?.conditions?.includes('ANC'));
+  const effectiveAge = Number(age) || targetPatient?.age || undefined;
+
+  const decision = buildClinicalDecision({
+    symptoms,
+    symptomNarrative: chiefComplaint || (Array.isArray(symptoms) ? symptoms.join(', ') : ''),
+    vitals,
+    patient: {
+      isPregnant,
+      age: effectiveAge,
+      conditions: targetPatient?.conditions || []
+    }
+  });
+
+  // 5. lnkling Multilingual AI Enrichment
   const lnklingInput = {
-    chiefComplaint: chiefComplaint || symptoms.join(', '),
-    notes: notes || vitals ? `BP:${vitals.bp || ''} Temp:${vitals.temp || ''} SpO2:${vitals.spo2 || ''}` : undefined,
+    chiefComplaint: chiefComplaint || (Array.isArray(symptoms) ? symptoms.join(', ') : ''),
+    notes: notes || (vitals ? `BP:${vitals.bp || ''} Temp:${vitals.temp || ''} SpO2:${vitals.spo2 || ''}` : undefined),
     temperature: Number(vitals.temp) || undefined,
     severity: severity ? Number(severity) : undefined,
-    pregnant: Boolean(pregnant),
-    age: age ? Number(age) : undefined,
-    language: ['en', 'hi', 'mr', 'te', 'kn'].includes(lang) ? lang : 'en',
+    pregnant: isPregnant,
+    age: effectiveAge,
+    language: ['en', 'hi', 'mr', 'te', 'kn'].includes(lang) ? lang : 'en'
   };
   const lnkling = await analyzeSymptoms(lnklingInput);
 
-  // ── Merge — existing fields win, lnkling adds optional enrichment ────────────
-  // Urgency: lnkling 'high' → maps to existing 'emergency'/'urgent' when stronger
-  const lnklingUrgencyScore = lnkling.urgency === 'high' ? 90 : lnkling.urgency === 'moderate' ? 65 : 30;
-  const finalUrgencyScore = Math.max(
-    decision.urgency === 'emergency' ? 95 : decision.urgency === 'urgent' ? 75 : 35,
-    lnklingUrgencyScore
-  );
+  // 6. Safety Floor: AI can escalate, but NEVER downgrade a rule-triggered emergency
+  const lnklingMappedUrgency = lnkling.urgency === 'high' ? 'urgent' : lnkling.urgency === 'moderate' ? 'urgent' : 'routine';
+  const finalDecision = buildClinicalDecision({
+    symptoms,
+    symptomNarrative: lnklingInput.chiefComplaint,
+    vitals,
+    patient: { isPregnant, age: effectiveAge },
+    aiEscalation: { urgency: lnklingMappedUrgency }
+  });
 
-  // Merge diagnostics (dedup)
-  const mergedDiagnostics = [
-    ...decision.recommendations.map(r => r.name),
-    ...lnkling.suggestedDiagnostics
-  ].filter((v, i, a) => a.indexOf(v) === i);
-
-  // Auto-save to patient's longitudinal record in MongoDB or in-memory
-  const triageEncounterData = {
-    patientId: 'pat-savita',
-    abhaId: req.body.abhaId || 'ABHA-AP-2026-00101',
-    facilityId: 'PHC-INAVOLU-01',
-    facilityName: 'Dr. YSR Village Health Clinic - Inavolu',
-    department: lnkling.opDepartment || decision.department || 'General OPD',
-    type: decision.urgency === 'emergency' ? 'Emergency' : 'OPD',
-    status: 'waiting',
-    chiefComplaint: lnklingInput.chiefComplaint || 'Clinical Analyse Assessment',
-    conductedAt: new Date(),
-    triageResult: {
-      urgency: decision.urgency,
-      suggestedDept: lnkling.opDepartment || decision.department,
-      vitals,
-      notes: lnkling.patientMessage || decision.notes,
-      ashaChecklist: lnkling.ashaMessage,
-      suggestedDiagnostics: mergedDiagnostics
-    }
-  };
-
-  if (dbOk()) {
-    try {
-      const pName = req.body.patientName || req.body.context || 'Lakshmi Devi';
-      let patientDoc = await Patient.findOne({ $or: [{ name: pName }, { abhaId: req.body.abhaId || '' }] });
-      if (!patientDoc) {
-        patientDoc = await Patient.create({
-          name: pName,
-          abhaId: req.body.abhaId || `ABHA-2026-${Math.floor(10000000000000 + Math.random() * 90000000000000)}`,
-          phone: req.body.phone || '9848011223',
-          gender: 'F',
-          age: Number(age) || 28,
-          village: 'Inavolu Village',
-          district: 'Guntur',
-          state: 'Andhra Pradesh',
-          riskCategory: decision.urgency === 'emergency' ? 'high' : decision.urgency === 'urgent' ? 'moderate' : 'low'
-        });
+  // 7. Persist encounter ONLY if authenticated/requested and attribution is fully validated
+  if (saveEncounter && targetPatient) {
+    const encounterData = {
+      patientId: targetPatient._id,
+      patientName: targetPatient.name,
+      abhaId: targetPatient.abhaId,
+      facilityId: validatedFacilityId || targetPatient.primaryFacilityId || 'PHC-KELWA-01',
+      facilityName: 'Assigned Health Centre',
+      department: finalDecision.department || 'General OPD',
+      type: finalDecision.urgency === 'emergency' ? 'Emergency' : 'OPD',
+      status: 'waiting',
+      chiefComplaint: lnklingInput.chiefComplaint || 'Clinical Assessment',
+      conductedAt: new Date(),
+      triageResult: {
+        urgency: finalDecision.urgency,
+        suggestedDept: finalDecision.department,
+        vitals,
+        notes: lnkling.patientMessage || finalDecision.summary,
+        ashaChecklist: lnkling.ashaMessage,
+        suggestedDiagnostics: finalDecision.recommendations.map(r => r.name)
       }
-      await Encounter.create({
-        ...triageEncounterData,
-        patientId: patientDoc._id,
-        abhaId: patientDoc.abhaId
-      });
-    } catch (err) {
-      console.warn('[triage] Could not persist encounter to MongoDB:', err.message);
+    };
+
+    if (dbOk()) {
+      try {
+        await Encounter.create(encounterData);
+      } catch (err) {
+        console.warn('[triage] Could not persist encounter:', err.message);
+      }
+    } else {
+      inMemEncounters.unshift({ ...encounterData, _id: `enc-${Date.now()}` });
     }
-  } else {
-    inMemEncounters.unshift({ ...triageEncounterData, _id: `enc-${Date.now()}` });
   }
 
+  // 8. Return response with explicit clinician review requirement & non-diagnostic disclaimer
   res.json({
     data: {
-      urgency: decision.urgency,
-      urgencyScore: finalUrgencyScore,
-      department: lnkling.opDepartment || decision.department,
-      priority: lnkling.priority || (decision.urgency === 'emergency' ? 'emergency' : 'normal'),
-      specialty: lnkling.specialty || decision.specialty || 'General Medicine',
-      recommendedAction: decision.recommendedAction || (decision.urgency === 'emergency' ? 'immediate_emergency_transit' : 'phc_primary_care'),
-      recommendations: decision.recommendations || [],
-      suggestedDiagnostics: mergedDiagnostics,
-      reasons: [...(decision.reasons || []), ...(lnkling.reasons || [])].filter((v, i, a) => a.indexOf(v) === i),
-      redFlags: decision.redFlags || [],
-      vitalWarnings: decision.vitalWarnings || [],
+      urgency: finalDecision.urgency,
+      department: finalDecision.department,
+      priority: finalDecision.urgency === 'emergency' ? 'emergency' : 'normal',
+      specialty: finalDecision.specialty || 'General Medicine',
+      recommendedAction: finalDecision.recommendedAction,
+      recommendations: finalDecision.recommendations || [],
+      suggestedDiagnostics: finalDecision.recommendations.map(r => r.name),
+      reasons: finalDecision.reasons || [],
+      redFlags: finalDecision.redFlags || [],
+      vitalWarnings: finalDecision.vitalWarnings || [],
       patientMessage: lnkling.patientMessage,
       ashaMessage: lnkling.ashaMessage,
-      disclaimer: lnkling.disclaimer || 'AI clinical decision support — please confirm with on-duty medical officer.',
-      model: lnkling.model,
+      requiresClinicianReview: true,
+      disclaimer: 'ArogyaLink Clinical Decision Support is assistive only and does not constitute a medical diagnosis. All recommendations must be confirmed by an on-duty medical officer.',
+      model: lnkling.model || 'ArogyaLink-CDSS-Rules-Floor-v2',
       offline: lnkling.offline ?? false
     }
   });
@@ -2004,7 +2153,7 @@ app.get('/api/data/management/stats', optionalAuth, asyncHandler(async (req, res
   });
 }));
 
-app.get('/api/data/management/export-fhir', optionalAuth, asyncHandler(async (req, res) => {
+app.get('/api/data/management/export-fhir', requireAuth, requireRoles('district_admin', 'hospital_admin', 'phc_doctor', 'hospital_doctor'), asyncHandler(async (req, res) => {
   const patients = dbOk() ? await Patient.find({}).limit(50) : PATIENTS;
   const encounters = dbOk() ? await Encounter.find({}).limit(50) : [];
   const referrals = dbOk() ? await Referral.find({}).limit(50) : [];

@@ -145,9 +145,9 @@ export async function translateText(text, targetLang = 'te', sourceLang = 'en') 
   try {
     const res = await callOpenRouterChat({
       models: [
-        OPENROUTER_MODELS.INKLING_SMALL,
+        OPENROUTER_MODELS.NEMOTRON_LIGHTNING,
         OPENROUTER_MODELS.NEMOTRON_SUPER,
-        OPENROUTER_MODELS.GEMINI_FLASH
+        OPENROUTER_MODELS.NEMOTRON_NANO
       ],
       messages: [
         {

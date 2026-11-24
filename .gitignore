@@ -25,3 +25,10 @@ Thumbs.db
 
 # GitHub Workflows
 .github/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
