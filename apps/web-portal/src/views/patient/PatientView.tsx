@@ -1,3 +1,4 @@
+import { getBaseUrl } from '../../lib/api';
 import React, { useEffect, useState } from 'react';
 import { PageShell, EmptyState, SkeletonRow } from '../../components/layout/PageShell';
 import { TriageNoteCard } from '../../components/shared/TriageNoteCard';
@@ -55,7 +56,7 @@ const SymptomEntry: React.FC<{
     if (navigator.geolocation && !localStorage.getItem('al-lang-manual-override')) {
       navigator.geolocation.getCurrentPosition(
         pos => {
-          fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/location/detect-language`, {
+          fetch(`${getBaseUrl()}/api/location/detect-language`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude })

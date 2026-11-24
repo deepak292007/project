@@ -240,6 +240,18 @@ export const LoginGateway: React.FC = () => {
   async function handleDirectLogin(user: typeof activeRoleConfig.demoUsers[0]) {
     setLoading(true);
     try {
+      try {
+        const res = await api.post<{ ok: boolean; user: { name: string; role: Role; facilityId?: string; facilityName?: string }; accessToken?: string }>('/api/auth/login', {
+          email: user.email,
+          password: 'Password@123',
+          role: selectedRole
+        });
+        if (res?.accessToken && typeof localStorage !== 'undefined') {
+          localStorage.setItem('al_token', res.accessToken);
+        }
+      } catch (authErr) {
+        console.warn('API login call failed, proceeding with local session:', authErr);
+      }
       login(selectedRole || 'patient', user.name, currentLang, user.facilityId, user.facilityName);
       const welcomeMsg = currentLang === 'te'
         ? `${user.name} గా ఆరోగ్యలింక్‌కు స్వాగతం.`
@@ -261,11 +273,14 @@ export const LoginGateway: React.FC = () => {
     setLoading(true);
     setLoginError('');
     try {
-      const res = await api.post<{ ok: boolean; user: { name: string; role: Role; facilityId?: string; facilityName?: string } }>('/api/auth/login', {
+      const res = await api.post<{ ok: boolean; user: { name: string; role: Role; facilityId?: string; facilityName?: string }; accessToken?: string }>('/api/auth/login', {
         email,
         password,
         role: selectedRole
       });
+      if (res?.accessToken && typeof localStorage !== 'undefined') {
+        localStorage.setItem('al_token', res.accessToken);
+      }
       if (res?.user) {
         login(res.user.role || selectedRole || 'patient', res.user.name, currentLang, res.user.facilityId, res.user.facilityName);
         speak(

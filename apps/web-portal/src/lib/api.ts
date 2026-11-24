@@ -1,23 +1,34 @@
 // Typed API client for ArogyaLink backend
-const getBaseUrl = (): string => {
-  const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl && envUrl !== 'http://localhost:4000' && envUrl !== '') return envUrl;
+export const getBaseUrl = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
   if (typeof window !== 'undefined') {
+    // In production or cloud host (e.g. Vercel), default to relative /api path
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return '';
+    }
     const host = window.location.hostname || 'localhost';
     return `http://${host}:4000`;
   }
   return 'http://localhost:4000';
 };
 
-const BASE = getBaseUrl();
+export const BASE = getBaseUrl();
 
 export type ApiResponse<T> = { data: T } | { error: string };
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const base = getBaseUrl();
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('al_token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${base}${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     const json = await res.json();

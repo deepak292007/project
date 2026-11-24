@@ -20,9 +20,9 @@ const NAV_CONFIG: Record<Role, NavItem[]> = {
     { id: 'symptom', label: { en: 'Report Symptoms & Analyse', mr: 'लक्षणे नोंदवा व विश्लेषण', hi: 'लक्षण दर्ज करें एवं विश्लेषण', te: 'లక్షణాలు నమోదు & విశ్లేషణ', kn: 'ಲಕ್ಷಣಗಳ ದಾಖಲೆ & ವಿಶ್ಲೇಷಣೆ' }, icon: <Icon path="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 6v4l3 3" /> },
     { id: 'opd',     label: { en: 'Book OP Token & Queue', mr: 'ओपीडी टोकन व प्रतीक्षा वेळ', hi: 'ओपीडी टोकन एवं कतार', te: 'OP టోకెన్ & క్యూ సమయం', kn: 'OP ಟೋಕನ್ & ಕ್ಯೂ ಸಮಯ' }, icon: <Icon path="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9l2 2 4-4" /> },
     { id: 'facility', label: { en: 'Find Nearest Facility', mr: 'जवळचे रुग्णालय', hi: 'नजदीकी अस्पताल', te: 'సమీప ఆసుపత్రి (AI Ranking)', kn: 'ಸಮೀಪದ ಆಸ್ಪತ್ರೆ (AI Ranking)' }, icon: <Icon path="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" d2="M12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" /> },
-    { id: 'rooms',    label: { en: 'Available Rooms & Tariffs', mr: '?????? ???? ? ??', hi: '?????? ???? ??? ?????', te: '???????? ????? & ????', kn: '???????? & ?????' }, icon: <Icon path="M3 7h18M3 12h18M3 17h18M5 5v14M19 5v14" /> },
+    { id: 'rooms',    label: { en: 'Available Rooms & Tariffs', mr: 'उपलब्ध खोल्या आणि दर', hi: 'उपलब्ध कमरे एवं दर', te: 'అందుబాటులో ఉన్న గదులు & ధరలు', kn: 'ಲಭ್ಯವಿರುವ ಕೊಠಡಿಗಳು & ದರಗಳು' }, icon: <Icon path="M3 7h18M3 12h18M3 17h18M5 5v14M19 5v14" /> },
     { id: 'transport', label: { en: '108 Transport & Hub Labs', mr: '१०८ वाहतूक व लॅब नेटवर्क', hi: '108 वाहन एवं लैब नेटवर्क', te: '108 వాహనం & ల్యాబ్ నెట్‌వర్క్', kn: '108 ವಾಹನ & ಲ್ಯಾಬ್ ಜಾಲ' }, icon: <Icon path="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1 .4-1 1v7c0 .6.4 1 1 1h1" d2="M7.5 17.5a2.5 2.5 0 1 0 0 .01M17.5 17.5a2.5 2.5 0 1 0 0 .01" /> },
-    { id: 'emergency', label: { en: 'Emergency SOS (Offline/Online)', mr: 'आणीबाणी एसओएस (SOS)', hi: 'आपातकालीन एसओएस (SOS)', te: 'ఎమర్జెンసీ SOS (108)', kn: 'ತುರ್ತು SOS (108)' }, icon: <Icon path="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> },
+    { id: 'emergency', label: { en: 'Emergency SOS (Offline/Online)', mr: 'आणीबाणी एसओएस (SOS)', hi: 'आपातकालीन एसओएस (SOS)', te: 'ఎమర్జెన్సీ SOS (108)', kn: 'ತುರ್ತು SOS (108)' }, icon: <Icon path="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /> },
     { id: 'grievance', label: { en: 'Grievance & Feedback', mr: 'तक्रार व अभिप्राय', hi: 'शिकायत एवं प्रतिक्रिया', te: 'పౌర ఫిర్యాదులు & ఫీడ్‌బ్యాక్', kn: 'ದೂರುಗಳು ಮತ್ತು ಪ್ರತಿಕ್ರಿಯೆ' }, icon: <Icon path="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /> },
     { id: 'book',    label: { en: 'Teleconsultation', mr: 'दूरसल्ला (Teleconsult)', hi: 'टेलीपरामर्श', te: 'టెలీకన్సల్టేషన్ (స్పెషలిస్ట్)', kn: 'ಟೆಲಿಕನ್ಸಲ್ಟೇಶನ್ (ತಜ್ಞರು)' }, icon: <Icon path="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12 19.79 19.79 0 0 1 1.05 3.4 2 2 0 0 1 3 1.22h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9A16 16 0 0 0 15 16.91l1.14-1.21a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /> },
     { id: 'record',  label: { en: 'My Health Record', mr: 'आरोग्य रेकॉर्ड (ABHA)', hi: 'स्वास्थ्य रिकॉर्ड', te: 'నా ఆరోగ్య రికార్డు (ABHA)', kn: 'ನನ್ನ ಆರೋಗ್ಯ ದಾಖಲೆ (ABHA)' }, icon: <Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" d2="M14 2v6h6M16 13H8M16 17H8M10 9H8" /> },
@@ -48,7 +48,7 @@ const NAV_CONFIG: Record<Role, NavItem[]> = {
     { id: 'emergency', label: { en: 'Emergency Bay', mr: 'आणीबाणी कक्ष', hi: 'आपातकालीन कक्ष', te: 'ఎమర్జెన్సీ బే', kn: 'ತುರ್ತು ಚಿಕಿತ್ಸಾ ಕೊಠಡಿ' }, icon: <Icon path="M22 12h-4l-3 9L9 3l-3 9H2" /> },
     { id: 'diagnostics', label: { en: 'Diagnostics Hub', mr: 'केंद्रीय तपासणी केंद्र', hi: 'जांच केंद्र', te: 'డయాగ్నస్టిక్స్ హబ్', kn: 'ಡಯಾಗ್ನಸ್ಟಿಕ್ಸ್ ಹಬ್' }, icon: <Icon path="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" d2="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /> },
     { id: 'stock',     label: { en: 'Stock Alerts', mr: 'औषध साठा सूचना', hi: 'स्टॉक अलर्ट', te: 'మందుల నిల్వ హెచ్చరికలు', kn: 'ದಾಸ್ತಾನು ಎಚ್ಚರಿಕೆಗಳು' }, icon: <Icon path="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m10-18v18" /> },
-    { id: 'beds',      label: { en: 'Bed Allocation (Blue Room)', mr: '??? ???? (Blue Room)', hi: '??? ????? (Blue Room)', te: '???? ????????? (Blue Room)', kn: '?????? ?????? (Blue Room)' }, icon: <Icon path="M3 7h18M3 12h18M3 17h18" /> },
+    { id: 'beds',      label: { en: 'Bed Allocation (Blue Room)', mr: 'बेड वाटप (Blue Room)', hi: 'बेड आवंटन (Blue Room)', te: 'బెడ్ కేటాయింపు (Blue Room)', kn: 'ಹಾಸಿಗೆ ಹಂಚಿಕೆ (Blue Room)' }, icon: <Icon path="M3 7h18M3 12h18M3 17h18" /> },
   ],
   hospital_doctor: [
     { id: 'chart',    label: { en: 'Patient Chart', mr: 'रुग्ण तक्ता', hi: 'मरीज चार्ट', te: 'రోగి చార్ట్', kn: 'ರೋಗಿಯ ಚಾರ್ಟ್' }, icon: <Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" d2="M14 2v6h6" /> },
@@ -73,11 +73,12 @@ interface SideNavProps {
 export const SideNav: React.FC<SideNavProps> = ({ onNavigate }) => {
   const { role, name, facilityName, lang } = useSession();
   const currentLang = (['en', 'hi', 'mr', 'te', 'kn'].includes(lang) ? lang : 'en') as Lang;
-  const { activeNav, setActiveNav } = useUI();
+  const { activeNav, setActiveNav, mobileNavOpen, setMobileNavOpen } = useUI();
   const items = NAV_CONFIG[role] ?? [];
 
   function nav(id: string) {
     setActiveNav(id);
+    setMobileNavOpen(false);
     onNavigate(id);
   }
 
@@ -98,33 +99,42 @@ export const SideNav: React.FC<SideNavProps> = ({ onNavigate }) => {
   };
 
   return (
-    <nav className="app-nav" aria-label="Side navigation">
-      <div className="side-nav">
-        {/* Role info */}
-        <div style={{ padding: '16px', borderBottom: '1px solid var(--col-border)', marginBottom: 8 }}>
-          <div style={{ fontSize: '0.8125rem', color: 'var(--col-ink-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {signedInText[currentLang]}
+    <>
+      {mobileNavOpen && (
+        <div
+          className="nav-backdrop"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <nav className={`app-nav${mobileNavOpen ? ' mobile-open' : ''}`} aria-label="Side navigation">
+        <div className="side-nav">
+          {/* Role info */}
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--col-border)', marginBottom: 8 }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--col-ink-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              {signedInText[currentLang]}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '0.9375rem', marginTop: 2 }}>{name}</div>
+            {facilityName && (
+              <div style={{ fontSize: '0.8125rem', color: 'var(--col-teal-dark)', marginTop: 2 }}>{facilityName}</div>
+            )}
           </div>
-          <div style={{ fontWeight: 700, fontSize: '0.9375rem', marginTop: 2 }}>{name}</div>
-          {facilityName && (
-            <div style={{ fontSize: '0.8125rem', color: 'var(--col-teal-dark)', marginTop: 2 }}>{facilityName}</div>
-          )}
+
+          <div className="nav-section-label">{navSectionText[currentLang]}</div>
+
+          {items.map(item => (
+            <button
+              key={item.id}
+              onClick={() => nav(item.id)}
+              className={`nav-item${activeNav === item.id ? ' active' : ''}`}
+              aria-current={activeNav === item.id ? 'page' : undefined}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label[currentLang] || item.label.en}</span>
+            </button>
+          ))}
         </div>
-
-        <div className="nav-section-label">{navSectionText[currentLang]}</div>
-
-        {items.map(item => (
-          <button
-            key={item.id}
-            onClick={() => nav(item.id)}
-            className={`nav-item${activeNav === item.id ? ' active' : ''}`}
-            aria-current={activeNav === item.id ? 'page' : undefined}
-          >
-            <span className="nav-icon">{item.icon}</span>
-            <span>{item.label[currentLang] || item.label.en}</span>
-          </button>
-        ))}
-      </div>
-    </nav>
+      </nav>
+    </>
   );
 };

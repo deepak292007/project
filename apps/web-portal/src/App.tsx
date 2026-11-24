@@ -19,14 +19,21 @@ let ws: WebSocket | null = null;
 
 function connectWS(onMessage: (type: string, data: unknown) => void) {
   try {
-    const wsProto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
-    ws = new WebSocket(`${wsProto}//${wsHost}:4000`);
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL;
+    if (wsUrl) {
+      ws = new WebSocket(wsUrl);
+    } else if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${wsProto}//${window.location.hostname}:4000`);
+    } else {
+      // In cloud/Vercel production without dedicated WS URL, gracefully skip local port 4000 connection
+      return;
+    }
     ws.onmessage = (e) => {
       try { const msg = JSON.parse(e.data); onMessage(msg.type, msg.data); } catch {}
     };
     ws.onerror = () => {};
-    ws.onclose = () => { setTimeout(() => connectWS(onMessage), 5000); };
+    ws.onclose = () => { setTimeout(() => connectWS(onMessage), 8000); };
   } catch {}
 }
 

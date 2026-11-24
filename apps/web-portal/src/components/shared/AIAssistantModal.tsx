@@ -1,3 +1,4 @@
+import { getBaseUrl } from '../../lib/api';
 import React, { useState, useRef, useEffect } from 'react';
 import { useSession } from '../../store';
 import { speak, isSupported } from '../../lib/voice';
@@ -96,7 +97,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({ isOpen, onCl
     setLoading(true);
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/ai/chat`, {
+      const res = await fetch(`${getBaseUrl()}/api/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

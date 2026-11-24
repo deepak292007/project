@@ -27,8 +27,10 @@ export const useSession = create<SessionState>()(
         set({ isLoggedIn: true, role, name, lang, facilityId, facilityName });
       },
 
-      logout: () =>
-        set({ isLoggedIn: false, role: 'patient', name: '', facilityId: undefined, facilityName: undefined }),
+      logout: () => {
+        if (typeof window !== 'undefined') localStorage.removeItem('al_token');
+        set({ isLoggedIn: false, role: 'patient', name: '', facilityId: undefined, facilityName: undefined });
+      },
 
       setLang: (lang) => {
         if (typeof window !== 'undefined') localStorage.setItem('al_lang', lang);
@@ -74,6 +76,9 @@ interface UIState {
   voiceTranscript: string;
   voiceSpeaking: boolean;
   setVoiceState: (transcript: string, speaking: boolean) => void;
+  mobileNavOpen: boolean;
+  toggleMobileNav: () => void;
+  setMobileNavOpen: (v: boolean) => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -82,4 +87,7 @@ export const useUI = create<UIState>((set) => ({
   voiceTranscript: '',
   voiceSpeaking: false,
   setVoiceState: (voiceTranscript, voiceSpeaking) => set({ voiceTranscript, voiceSpeaking }),
+  mobileNavOpen: false,
+  toggleMobileNav: () => set((s) => ({ mobileNavOpen: !s.mobileNavOpen })),
+  setMobileNavOpen: (mobileNavOpen) => set({ mobileNavOpen }),
 }));

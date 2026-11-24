@@ -9,8 +9,7 @@
  */
 
 import type { Lang } from '../types';
-
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+import { getBaseUrl } from './api';
 
 /**
  * Translate a short string via the lnkling server endpoint.
@@ -23,7 +22,8 @@ const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 export async function translate(text: string, targetLang: Lang): Promise<string> {
   if (!text) return text;
   try {
-    const res = await fetch(`${BASE}/api/ai/translate`, {
+    const base = getBaseUrl();
+    const res = await fetch(`${base}/api/ai/translate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, targetLang }),

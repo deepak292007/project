@@ -36,7 +36,8 @@ const LEVEL_COLORS: Record<string, string> = {
 const DEFAULT_LAT = 16.5062;
 const DEFAULT_LNG = 80.6480;
 
-const BASE = (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || 'http://localhost:4000';
+import { getBaseUrl } from '../../lib/api';
+const BASE = getBaseUrl();
 
 export const DistanceFinder: React.FC = () => {
   const { lang, setLang } = useSession();

@@ -1,3 +1,6 @@
+import { getBaseUrl } from '../../lib/api';
+
+const BASE = getBaseUrl();
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { useSession } from '../../store';
@@ -93,8 +96,6 @@ export const LiveFacilityMap: React.FC<LiveFacilityMapProps> = ({
   const [searching, setSearching] = useState<boolean>(false);
   const [filterType, setFilterType] = useState<'all' | 'emergency' | 'phc' | 'hospital'>('all');
   const [lastUpdated, setLastUpdated] = useState<string>('');
-
-  const BASE = (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || 'http://localhost:4000';
 
   // Helper to create custom HTML icons
   const createUserPinIcon = () => {

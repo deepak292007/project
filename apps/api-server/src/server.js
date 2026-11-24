@@ -315,13 +315,14 @@ wss.on('connection', ws => {
 });
 
 // Heartbeat
-setInterval(() => {
+const heartbeatTimer = setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
 }, 30000);
+if (typeof heartbeatTimer?.unref === 'function') heartbeatTimer.unref();
 
 const dbOk = () => mongoose.connection.readyState === 1;
 
@@ -2605,14 +2606,16 @@ app.use(errorHandler);
 // ─── Start Server ─────────────────────────────────────────────────────────────
 async function start() {
   await connectDB();
-  server.listen(PORT, () => {
+  if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
+    server.listen(PORT, () => {
     console.log(`✓ ArogyaLink API running on http://localhost:${PORT}`);
     console.log(`  Health Check:   GET  /api/health`);
     console.log(`  JWT Auth Login: POST /api/auth/login`);
     console.log(`  Offline Sync:   POST /api/sync`);
     console.log(`  FHIR Export:    GET  /api/data/management/export-fhir`);
     console.log(`  Decision CDS:   POST /api/ai/clinical-assessments`);
-  });
+    });
+  }
 }
 
 start().catch(console.error);
