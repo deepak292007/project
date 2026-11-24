@@ -30,6 +30,32 @@ const ClinicalAssessmentSchema = new mongoose.Schema({
   },
   recommendations: [RecommendationSchema], facilityMatches: [FacilityMatchSchema], selectedFacilityId: String,
   clinicianReview: { status: { type: String, enum: ['pending', 'accepted', 'overridden'], default: 'pending' }, reviewedBy: String, reviewedAt: Date, note: String },
+  // ML Gold Labels & Downstream Clinical Outcomes (for Model 1 & 4 Training)
+  finalDiagnosis: {
+    primary: String,
+    icd10: String,
+    confirmedBy: String,
+    confirmedAt: Date
+  },
+  referralOutcome: {
+    status: { type: String, enum: ['completed', 'escalated', 'expired', 'lost_to_followup', 'stabilized'] },
+    finalFacilityId: String,
+    outcomeSummary: String,
+    completedAt: Date
+  },
+  emergencyConfirmed: {
+    isEmergency: Boolean,
+    confirmedBy: String,
+    confirmedAt: Date,
+    notes: String
+  },
+  // ABDM / DPDP Act Compliant Consent & De-Identification Tracking
+  trainingDataFlags: {
+    consentForTraining: { type: Boolean, default: false },
+    abdmConsentArtefactId: String,
+    deIdentified: { type: Boolean, default: false },
+    exportedForTrainingAt: Date
+  },
   consent: { decisionSupportAcceptedAt: Date, capturedBy: String },
 }, { timestamps: true });
 
